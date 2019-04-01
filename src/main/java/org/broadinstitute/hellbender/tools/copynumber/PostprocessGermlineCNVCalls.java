@@ -15,8 +15,8 @@ import org.broadinstitute.hellbender.tools.copynumber.formats.collections.*;
 import org.broadinstitute.hellbender.tools.copynumber.formats.metadata.LocatableMetadata;
 import org.broadinstitute.hellbender.tools.copynumber.formats.metadata.SimpleSampleLocatableMetadata;
 import org.broadinstitute.hellbender.tools.copynumber.formats.records.CopyNumberPosteriorDistribution;
-import org.broadinstitute.hellbender.tools.copynumber.formats.records.LinearNonLocatableCopyRatio;
-import org.broadinstitute.hellbender.tools.copynumber.formats.records.DenoisedLocatableCopyRatio;
+import org.broadinstitute.hellbender.tools.copynumber.formats.records.NonLocatableLinearCopyRatio;
+import org.broadinstitute.hellbender.tools.copynumber.formats.records.LinearCopyRatio;
 import org.broadinstitute.hellbender.tools.copynumber.formats.records.IntervalCopyNumberGenotypingData;
 import org.broadinstitute.hellbender.tools.copynumber.gcnv.GermlineCNVIntervalVariantComposer;
 import org.broadinstitute.hellbender.tools.copynumber.gcnv.GermlineCNVNamingConstants;
@@ -41,7 +41,7 @@ import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 /**
- * Postprocesses the output of {@link GermlineCNVCaller} and generates VCF files as well as concatenated denoised
+ * Postprocesses the output of {@link GermlineCNVCaller} and generates VCF files as well as a concatenated denoised
  * copy ratio file.
  *
  * <p>This tool generates "intervals" and "segments" VCF files that serve complementary purposes. The intervals VCF
@@ -61,8 +61,8 @@ import java.util.stream.IntStream;
  * by the sex karyotype of the sample and is set to the pre-determined contig ploidy state fetched from the output
  * calls of {@link DetermineGermlineContigPloidy}.</p>
  *
- * <p>Finally, the Postprocessor concatenates denoised copy ratio tables from all the call shards produced by the
- * {@link GermlineCNVCaller} into a single table. </p>
+ * <p>Finally, the tool concatenates posterior means for denoised copy ratios from all the call shards produced by
+ * the {@link GermlineCNVCaller} into a single file. </p>
  *
  * <h3>Required inputs:</h3>
  * <ul>
@@ -72,6 +72,7 @@ import java.util.stream.IntStream;
  *     <li>Index of the sample in the call-set (which is expected to be the same across all shards)</li>
  *     <li>Output path for writing the intervals VCF</li>
  *     <li>Output path for writing the segments VCF</li>
+ *     <li>Output path for writing the concatenated denoised copy ratios</li>
  * </ul>
  *
  * <p>The calls or model shards can be specified in arbitrary order.</p>
@@ -97,8 +98,8 @@ import java.util.stream.IntStream;
  * @author Andrey Smirnov &lt;asmirnov@broadinstitute.org&gt;
  */
 @CommandLineProgramProperties(
-        summary = "Postprocesses the output of GermlineCNVCaller, generates VCF files and concatenates denoised copy ratio files ",
-        oneLineSummary = "Postprocesses the output of GermlineCNVCaller, generates VCF files and concatenates denoised copy ratio files",
+        summary = "Postprocesses the output of GermlineCNVCaller and generates VCFs and denoised copy ratios.",
+        oneLineSummary = "Postprocesses the output of GermlineCNVCaller and generates VCFs and denoised copy ratios.",
         programGroup = CopyNumberProgramGroup.class
 )
 @DocumentedFeature
@@ -114,7 +115,6 @@ public final class PostprocessGermlineCNVCalls extends GATKTool {
     public static final String OUTPUT_DENOISED_COPY_RATIOS_LONG_NAME = "output-denoised-copy-ratios";
     public static final String AUTOSOMAL_REF_COPY_NUMBER_LONG_NAME = "autosomal-ref-copy-number";
     public static final String ALLOSOMAL_CONTIG_LONG_NAME = "allosomal-contig";
-
 
     @Argument(
             doc = "List of paths to GermlineCNVCaller call directories.",
@@ -172,10 +172,9 @@ public final class PostprocessGermlineCNVCalls extends GATKTool {
 
     @Argument(
             doc = "Output denoised copy ratio file concatenated together from call shards.",
-            fullName = OUTPUT_DENOISED_COPY_RATIOS_LONG_NAME,
-            optional = true
+            fullName = OUTPUT_DENOISED_COPY_RATIOS_LONG_NAME
     )
-    private File outputDenoisedCopyRatioFile = null;
+    private File outputDenoisedCopyRatioFile;
 
     /**
      * A list of {@link SimpleIntervalCollection} for each shard
@@ -314,7 +313,8 @@ public final class PostprocessGermlineCNVCalls extends GATKTool {
         CopyNumberArgumentValidationUtils.validateInputs(inputContigPloidyCallsPath);
         CopyNumberArgumentValidationUtils.validateOutputFiles(
                 outputIntervalsVCFFile,
-                outputSegmentsVCFFile);
+                outputSegmentsVCFFile,
+                outputDenoisedCopyRatioFile);
     }
 
     @Override
@@ -347,46 +347,78 @@ public final class PostprocessGermlineCNVCalls extends GATKTool {
         intervalsVCFWriter.close();
     }
 
-    private void concatenateDenoisedCopyRatioFiles() {
-        if (outputDenoisedCopyRatioFile != null) {
-            logger.info("Concatenating the denoised copy ratios...");
-            final List<SimpleInterval> concatenatedIntervalList = new ArrayList<>();
-            final List<LinearNonLocatableCopyRatio> concatenatedDenoisedCopyRatioRecordsList = new ArrayList<>();
-            /* Read in and concatenate all denoised copy ratio files into one list */
-            for (int shardIndex = 0; shardIndex < numShards; shardIndex++) {
-                final File shardRootDirectory = sortedCallsShardPaths.get(shardIndex);
-                final File denoisedCopyRatioFile = getSampleDenoisedCopyRatioFile(shardRootDirectory, sampleIndex);
-                final DenoisedCopyRatioCollection shardDenoisedCopyRatioCollectionForShard = new DenoisedCopyRatioCollection(denoisedCopyRatioFile);
-                final List<SimpleInterval> shardIntervals = sortedIntervalCollections.get(shardIndex).getIntervals();
-                final String sampleNameFromDenoisedCopyRatioFile = shardDenoisedCopyRatioCollectionForShard
-                        .getMetadata().getSampleName();
-                Utils.validate(sampleNameFromDenoisedCopyRatioFile.equals(sampleName),
-                        String.format("Sample name found in the header of denoised copy ratio file for shard %d " +
-                                        "different from the expected sample name (found: %s, expected: %s).",
-                                shardIndex, sampleNameFromDenoisedCopyRatioFile, sampleName));
-                final List<LinearNonLocatableCopyRatio> shardDenoisedCopyRatioRecords = shardDenoisedCopyRatioCollectionForShard.getRecords();
-                Utils.validate(shardIntervals.size() == shardDenoisedCopyRatioRecords.size(),
-                        String.format("The number of entries in denoised copy ratio file for shard %d does " +
-                                        "not match the number of entries in the shard interval list (copy ratio list size: %d, " +
-                                        "interval list size: %d)", shardIndex, shardDenoisedCopyRatioRecords.size(),
-                                shardIntervals.size()));
-                concatenatedIntervalList.addAll(shardIntervals);
-                concatenatedDenoisedCopyRatioRecordsList.addAll(shardDenoisedCopyRatioRecords);
-            }
-            /* Attach the corresponding intervals */
-            final List<DenoisedLocatableCopyRatio> denoisedLocatableCopyRatioList =
-                    IntStream.range(0, concatenatedIntervalList.size()).mapToObj(intervalIndex ->
-                            new DenoisedLocatableCopyRatio(concatenatedIntervalList.get(intervalIndex),
-                                    concatenatedDenoisedCopyRatioRecordsList.get(intervalIndex))).collect(Collectors.toList());
-            final SimpleSampleLocatableMetadata metadata = new SimpleSampleLocatableMetadata(sampleName, sequenceDictionary);
-            /* Make a locatable collection of denoised copy ratios and write it to file */
-            final DenoisedLocatableCopyRatioCollection denoisedLocatableCopyRatioCollection =
-                    new DenoisedLocatableCopyRatioCollection(metadata, denoisedLocatableCopyRatioList);
-            denoisedLocatableCopyRatioCollection.write(outputDenoisedCopyRatioFile);
-            logger.info("Finished writing the denoised copy ratios file.");
-        } else {
-            logger.info("No denoised copy ratio file provided - skipping the concatenation step.");
+    private void generateSegmentsVCFFileFromAllShards() {
+        logger.info("Generating segments VCF file...");
+
+        /* perform segmentation */
+        final File pythonScriptOutputPath = IOUtils.createTempDir("gcnv-segmented-calls");
+        final boolean pythonScriptSucceeded = executeSegmentGermlineCNVCallsPythonScript(
+                sampleIndex, inputContigPloidyCallsPath, sortedCallsShardPaths, sortedModelShardPaths,
+                pythonScriptOutputPath);
+        if (!pythonScriptSucceeded) {
+            throw new UserException("Python return code was non-zero.");
         }
+
+        /* parse segments */
+        final File copyNumberSegmentsFile = getCopyNumberSegmentsFile(pythonScriptOutputPath, sampleIndex);
+        final IntegerCopyNumberSegmentCollection integerCopyNumberSegmentCollection =
+                new IntegerCopyNumberSegmentCollection(copyNumberSegmentsFile);
+        final String sampleNameFromSegmentCollection = integerCopyNumberSegmentCollection
+                .getMetadata().getSampleName();
+        Utils.validate(sampleNameFromSegmentCollection.equals(sampleName),
+                String.format("Sample name found in the header of copy-number segments file is " +
+                                "different from the expected sample name (found: %s, expected: %s).",
+                        sampleNameFromSegmentCollection, sampleName));
+
+        /* write variants */
+        logger.info(String.format("Writing segments VCF file to %s...", outputSegmentsVCFFile.getAbsolutePath()));
+        final VariantContextWriter segmentsVCFWriter = createVCFWriter(outputSegmentsVCFFile);
+        final GermlineCNVSegmentVariantComposer germlineCNVSegmentVariantComposer =
+                new GermlineCNVSegmentVariantComposer(segmentsVCFWriter, sampleName,
+                        refAutosomalIntegerCopyNumberState, allosomalContigSet);
+        germlineCNVSegmentVariantComposer.composeVariantContextHeader(getDefaultToolVCFHeaderLines());
+        germlineCNVSegmentVariantComposer.writeAll(integerCopyNumberSegmentCollection.getRecords());
+        segmentsVCFWriter.close();
+    }
+
+    private void concatenateDenoisedCopyRatioFiles() {
+        logger.info("Generating denoised copy ratios...");
+        final List<SimpleInterval> concatenatedIntervalList = new ArrayList<>();
+        final List<NonLocatableLinearCopyRatio> concatenatedDenoisedCopyRatioRecordsList = new ArrayList<>();
+        /* Read in and concatenate all denoised copy ratio files into one list */
+        for (int shardIndex = 0; shardIndex < numShards; shardIndex++) {
+            final File shardRootDirectory = sortedCallsShardPaths.get(shardIndex);
+            final File denoisedCopyRatioFile = getSampleDenoisedCopyRatioFile(shardRootDirectory, sampleIndex);
+            final NonLocatableLinearCopyRatioCollection shardNonLocatableLinearCopyRatioCollectionForShard = new NonLocatableLinearCopyRatioCollection(denoisedCopyRatioFile);
+            final List<SimpleInterval> shardIntervals = sortedIntervalCollections.get(shardIndex).getIntervals();
+            final String sampleNameFromDenoisedCopyRatioFile = shardNonLocatableLinearCopyRatioCollectionForShard
+                    .getMetadata().getSampleName();
+            Utils.validate(sampleNameFromDenoisedCopyRatioFile.equals(sampleName),
+                    String.format("Sample name found in the header of denoised copy ratio file for shard %d " +
+                                    "is different from the expected sample name (found: %s, expected: %s).",
+                            shardIndex, sampleNameFromDenoisedCopyRatioFile, sampleName));
+            final List<NonLocatableLinearCopyRatio> shardDenoisedCopyRatioRecords = shardNonLocatableLinearCopyRatioCollectionForShard.getRecords();
+            Utils.validate(shardIntervals.size() == shardDenoisedCopyRatioRecords.size(),
+                    String.format("The number of entries in denoised copy ratio file for shard %d does " +
+                                    "not match the number of entries in the shard interval list (copy ratio list size: %d, " +
+                                    "interval list size: %d)",
+                            shardIndex, shardDenoisedCopyRatioRecords.size(), shardIntervals.size()));
+            concatenatedIntervalList.addAll(shardIntervals);
+            concatenatedDenoisedCopyRatioRecordsList.addAll(shardDenoisedCopyRatioRecords);
+        }
+        /* Attach the corresponding intervals */
+        final List<LinearCopyRatio> linearCopyRatioList =
+                IntStream.range(0, concatenatedIntervalList.size())
+                        .mapToObj(intervalIndex -> new LinearCopyRatio(
+                                concatenatedIntervalList.get(intervalIndex),
+                                concatenatedDenoisedCopyRatioRecordsList.get(intervalIndex)))
+                        .collect(Collectors.toList());
+        final SimpleSampleLocatableMetadata metadata = new SimpleSampleLocatableMetadata(sampleName, sequenceDictionary);
+        /* Make a locatable collection of denoised copy ratios and write it to file */
+        final LinearCopyRatioCollection linearCopyRatioCollection =
+                new LinearCopyRatioCollection(metadata, linearCopyRatioList);
+        logger.info(String.format("Writing denoised copy ratios to %s...", outputDenoisedCopyRatioFile.getAbsolutePath()));
+        linearCopyRatioCollection.write(outputDenoisedCopyRatioFile);
     }
 
     /**
@@ -510,40 +542,6 @@ public final class PostprocessGermlineCNVCalls extends GATKTool {
      */
     private static File getIntervalFileFromShardDirectory(final File shardPath) {
         return new File(shardPath, GermlineCNVNamingConstants.INTERVAL_LIST_FILE_NAME);
-    }
-
-    private void generateSegmentsVCFFileFromAllShards() {
-        logger.info("Generating segments VCF file...");
-
-        /* perform segmentation */
-        final File pythonScriptOutputPath = IOUtils.createTempDir("gcnv-segmented-calls");
-        final boolean pythonScriptSucceeded = executeSegmentGermlineCNVCallsPythonScript(
-                sampleIndex, inputContigPloidyCallsPath, sortedCallsShardPaths, sortedModelShardPaths,
-                pythonScriptOutputPath);
-        if (!pythonScriptSucceeded) {
-            throw new UserException("Python return code was non-zero.");
-        }
-
-        /* parse segments */
-        final File copyNumberSegmentsFile = getCopyNumberSegmentsFile(pythonScriptOutputPath, sampleIndex);
-        final IntegerCopyNumberSegmentCollection integerCopyNumberSegmentCollection =
-                new IntegerCopyNumberSegmentCollection(copyNumberSegmentsFile);
-        final String sampleNameFromSegmentCollection = integerCopyNumberSegmentCollection
-                .getMetadata().getSampleName();
-        Utils.validate(sampleNameFromSegmentCollection.equals(sampleName),
-                String.format("Sample name found in the header of copy-number segments file is " +
-                                "different from the expected sample name (found: %s, expected: %s).",
-                        sampleNameFromSegmentCollection, sampleName));
-
-        /* write variants */
-        logger.info(String.format("Writing segments VCF file to %s...", outputSegmentsVCFFile.getAbsolutePath()));
-        final VariantContextWriter segmentsVCFWriter = createVCFWriter(outputSegmentsVCFFile);
-        final GermlineCNVSegmentVariantComposer germlineCNVSegmentVariantComposer =
-                new GermlineCNVSegmentVariantComposer(segmentsVCFWriter, sampleName,
-                        refAutosomalIntegerCopyNumberState, allosomalContigSet);
-        germlineCNVSegmentVariantComposer.composeVariantContextHeader(getDefaultToolVCFHeaderLines());
-        germlineCNVSegmentVariantComposer.writeAll(integerCopyNumberSegmentCollection.getRecords());
-        segmentsVCFWriter.close();
     }
 
     /**

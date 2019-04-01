@@ -108,7 +108,7 @@ public final class PostprocessGermlineCNVCallsIntegrationTest extends CommandLin
                                         final List<String> modelShards) throws IOException {
         final File actualIntervalsOutputVCF = createTempFile("intervals-output-vcf-" + sampleIndex, ".vcf");
         final File actualSegmentsOutputVCF = createTempFile("segments-output-vcf-" + sampleIndex, ".vcf");
-        final File actualDenoisedCopyRatiosOutput = createTempFile("denoised_copy_ratios-output-" + sampleIndex, ".tsv");
+        final File actualDenoisedCopyRatiosOutput = createTempFile("denoised-copy-ratios-output-" + sampleIndex, ".tsv");
         final File expectedIntervalsOutputVCF = INTERVALS_VCF_CORRECT_OUTPUTS.get(sampleIndex);
         final File expectedSegmentsOutputVCF = SEGMENTS_VCF_CORRECT_OUTPUTS.get(sampleIndex);
         final File expectedDenoisedCopyRatiosOutput = DENOISED_COPY_RATIOS_OUTPUTS.get(sampleIndex);
@@ -127,7 +127,7 @@ public final class PostprocessGermlineCNVCallsIntegrationTest extends CommandLin
         runToolForSingleSample(callShards, modelShards, sampleIndex,
                 createTempFile("intervals-output-vcf", ".vcf"),
                 createTempFile("segments-output-vcf", ".vcf"),
-                null,
+                createTempFile("denoised-copy-ratios-output", ".tsv"),
                 ALLOSOMAL_CONTIGS, AUTOSOMAL_REF_COPY_NUMBER);
     }
 
@@ -136,7 +136,7 @@ public final class PostprocessGermlineCNVCallsIntegrationTest extends CommandLin
         runToolForSingleSample(CALL_SHARDS, MODEL_SHARDS, 0,
                 createTempFile("intervals-output-vcf", ".vcf"),
                 createTempFile("segments-output-vcf", ".vcf"),
-                null,
+                createTempFile("denoised-copy-ratios-output", ".tsv"),
                 Collections.singletonList("Z"), /* unknown contig */
                 AUTOSOMAL_REF_COPY_NUMBER);
     }
