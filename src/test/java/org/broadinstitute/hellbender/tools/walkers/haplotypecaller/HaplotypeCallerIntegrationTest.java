@@ -388,7 +388,8 @@ public class HaplotypeCallerIntegrationTest extends CommandLineProgramTest {
                 "-pairHMM", "AVX_LOGLESS_CACHING",
                 "--" + StandardArgumentDefinitions.ADD_OUTPUT_VCF_COMMANDLINE, "false",
                 "--genotyping-mode", "GENOTYPE_GIVEN_ALLELES",
-                "--alleles", new File(TEST_FILES_DIR, "testGenotypeGivenAllelesMode_givenAlleles.vcf").getAbsolutePath()
+                "--alleles", new File(TEST_FILES_DIR, "testGenotypeGivenAllelesMode_givenAlleles.vcf").getAbsolutePath(),
+                "-bamout", "/Users/davidben/Desktop/bamout.bam"
         };
 
         runCommandLine(args);
