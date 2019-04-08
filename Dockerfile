@@ -20,6 +20,7 @@ RUN java -jar gatk.jar -h
 RUN mkdir /gatkCloneMountPoint
 RUN mkdir /jars
 RUN mkdir .gradle
+RUN mkdir /gatk/srcdir
 
 WORKDIR /gatk
 
