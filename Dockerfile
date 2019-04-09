@@ -32,7 +32,12 @@ RUN echo "source activate gatk" > /root/run_unit_tests.sh && \
     echo "export TEST_DEPENDENCY_JAR=\$( find /jars -name \"gatk*testDependencies.jar\" )" >> /root/run_unit_tests.sh && \
     echo "export GATK_JAR=$( find /gatk -name "gatk*local.jar" )" >> /root/run_unit_tests.sh && \
     echo "mkdir /gatk/srcdir" >> /root/run_unit_tests.sh && \
-    echo "cp -rp /gatkCloneMountPoint/src/main/java/* /gatk/srcdir" >> /root/run_unit_tests.sh && \
+    echo "mkdir /gatk/srcdir/main" >> /root/run_unit_tests.sh && \
+    echo "mkdir /gatk/srcdir/main/java" >> /root/run_unit_tests.sh && \
+    echo "mkdir /gatk/srcdir/test" >> /root/run_unit_tests.sh && \
+    echo "mkdir /gatk/srcdir/test/java" >> /root/run_unit_tests.sh && \
+    echo "cp -rp /gatkCloneMountPoint/src/main/java/* /gatk/srcdir/main/java" >> /root/run_unit_tests.sh && \
+    echo "cp -rp /gatkCloneMountPoint/src/test/java/* /gatk/srcdir/test/java" >> /root/run_unit_tests.sh && \
     echo "export SOURCE_DIR=/gatk/srcdir" >> /root/run_unit_tests.sh && \
     echo "export GRADLE_OPTS=\"-Xmx1024m -Dorg.gradle.daemon=false\"" /root/run_unit_tests.sh && \
     echo "export CP_DIR=/gatk/testClasses" /root/run_unit_tests.sh && \
